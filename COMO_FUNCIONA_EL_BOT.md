@@ -16,30 +16,41 @@ Este documento detalla la arquitectura operativa y el flujo del TX3 Bot tras su 
 
 ---
 
-## 🧠 Flujo de la Operación Automatizada
+## 🧠 El Cerebro Cuádruple: 4 Capas de Inteligencia Artificial
 
-El bot actúa bajo un modelo de **Filtros Sucesivos (Pipeline de Decisión)**:
+Lo que diferencia a este bot de un "Asesor Experto" (EA) tradicional es su **arquitectura de decisiones híbrida**. No obedece simplemente a líneas condicionales estáticas, sino que emplea una red de 4 capas distintas de IA superpuestas para tomar decisiones institucionales:
 
-### 1. El Generador Inicial
-Constantemente el bot escucha el mercado a través de **MetaTrader 5**. Generará una señal (Buy/Sell) ya sea por cruces base de medias móviles o, idealmente, empleando el modelo predictivo de IA (**Random Forest ML**) entrenado localmente.
+### 🤖 Capa 1: El Generador Cuantitativo (Machine Learning - Random Forest)
+La base del bot está en `ml_random_forest.py`. En lugar de buscar "cruces de medias móviles", el bot entrena un modelo de ***Machine Learning (Random Forest)*** con miles de velas de datos históricos de MetaTrader.
+* **Misión:** Aprender patrones no lineales ocultos del precio, volatilidad (ATR) y volumen.
+* **Acción:** Predecir si la próxima dirección del mercado será favorable para una compra (BUY), venta (SELL) o mantenernos al margen (HOLD).
 
-### 2. Los Escudos Protectores
-Antes de que una orden nazca, pasa por anillos de defensa:
-* **Filtro de Sesión**: Determina si los mercados base de la divisa elegida están abiertos y con suficiente liquidez institucional.
-* **Escudo de Noticias (FinBERT)**: Se conecta a la IA de HuggingFace leyendo los feeds financieros para cancelar trades en momentos de alta volatilidad impredecible.
-* **Escudo de Correlación**: Evita operar múltiples pares de divisas si sus gráficos marchan entrelazados (para no doblegar el riesgo o exponer demasiado margen localmente).
+### 📰 Capa 2: Analista Fundamental (NLP - FinBERT HuggingFace)
+En el trading institucional, los datos macroeconómicos destruyen cualquier gráfico técnico. El bot incluye a `ai_sentiment.py`.
+* **Misión:** Se conecta en tiempo real a las APIs de noticias globales y lee los titulares financieros utilizando ***Procesamiento de Lenguaje Natural (FinBERT de HuggingFace)***, un modelo pre-entrenado específicamente con jerga de Wall Street.
+* **Acción:** Si detecta noticias extremadamente bajistas o pánico en los mercados para la divisa operando, activa un **Killswitch (Escudo)** y bloquea instantáneamente las operaciones técnicas que vayan en su contra.
 
-### 3. Escáner Avanzado (Smart Money Concepts)
-Verifica la señal generada con la liquidez institucional leyendo el historial profundo del gráfico en busca de:
-* Zonas de Order Block.
-* Gaps (Imbalances o FVG). 
-(Solo operará si hay contexto institucional apoyando la dirección del Trade).
+### 🧠 Capa 3: Agente de Adaptación Dinámica (Reinforcement Learning - Q-Learning)
+Los mercados cambian (tendencia fuerte vs mercado lateral). Una estrategia estática siempre termina fallando cuando el régimen cambia. En `q_learning_agent.py` se aloja un cerebro de ***Aprendizaje por Refuerzo (RL)***.
+* **Misión:** Observar el contexto actual (indicador ADX, fuerza de tendencia) y darle una "recompensa" o "castigo" a la estrategia base según si acertaron o fallaron recientemente.
+* **Acción:** Si nota que el mercado está en un estado lateral errático, interviene la orden generada en la Capa 1 y emite un veto forzoso (HOLD) para salvaguardar tu dinero.
 
-### 4. Oráculo Juez Supremo (Gemini AI)
-La señal pre-aprobada se arma con metadatos y se envía a la nube de Google (Gemini) actuando como el Oficial Principal de Negociaciones (CIO). Esta inteligencia artificial generativa evalúa factores macro, técnicos adjuntos y da un dictamen probabilístico (Confidence %) con razones verbales de peso o, de considerarlo espurio, declina la orden de tajo. 
+### ⚖️ Capa 4: Oráculo Juez Supremo (LLM Generativo - Gemini AI)
+La señal pre-aprobada por el modelo de datos estadísticos (Capa 1), que pasó por el filtro de miedo del mercado (Capa 2) y que fue aprobada por el agente de adaptación (Capa 3), no se lanza al mercado directamente; antes debe pasar por la mesa del Director de Inversiones (CIO).
+* **Misión:** Un ***Modelo de Lenguaje Grande (Google Gemini)*** recibe en un *Prompt Compuesto* toda la telemetría del trade: el P&L actual, las condiciones técnicas, y el razonamiento base.
+* **Acción:** Gemini actúa como un humano profesional, evalúa el riesgo y escupe dos cosas vitales: un veredicto estructurado (`APPROVED` o `REJECTED`) y un **Nivel de Confianza (Confidence %)** del trade. Si lo considera una transacción basura, simplemente declina la orden de tajo. 
 
-### 5. Position Sizing (Kelly Criterion Dinámico)
-Por último, el tamaño de los Lotes que el bot inyectará a la plataforma ya no es aleatorio ni fijo. Una vez Gemini nos entrega su Nivel de Confianza Probabilístico del Trade (ej. `65% de chances de rebotar`), el motor matemático calcula qué porcentaje *estricto* del saldo arriesgar mediante el método **Kelly Fractional**. 
+---
+
+## ⚙️ Flujo de Operación (Pipeline de Decisión)
+
+Con la Inteligencia artificial de fondo, así es el día a día real del Bot:
+
+### 1. Detección y Escáner (Smart Money Concepts)
+Constantemente el bot escucha el mercado a través de MetaTrader 5. Las 4 capas de IA inician su procesamiento al unísono. Adicionalmente, escanea el historial gráfico profundo (SMC) buscando vacíos de liquidez (Gaps/FVG) o Zonas Institucionales de Order Blocks para apoyar la entrada IA.
+
+### 2. Dimensionamiento del Lote por IA (Position Sizing - Kelly Criterion)
+Una vez **Gemini AI** nos entrega su Nivel de Confianza Probabilístico del Trade (ej. `68% de certeza`), el tamaño de los Lotes que el bot inyectará a la plataforma no será un miserable `0.01` estático ni un salvaje `1.0`. El motor matemático calcula qué porcentaje *estricto* de los dólares de tu cuenta arriesgar utilizando el modelo iterativo de apuestas **Kelly Fractional**.
 
 ### 6. Ejecución y Post-Operativa
 Luego de colocada la operación se envían alertas de Telegram y bitácoras (Trade Journaling).  
