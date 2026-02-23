@@ -1,0 +1,531 @@
+"""
+🤖 TX3 Bot - Main Entry Point (Professional Edition)
+===============================================================
+Bot de trading automatizado.
+
+Incluye:
+- 📱 Telegram Notifications
+- 🌐 Web Dashboard (Real-time)
+- 💾 State Persistence
+- 📰 News Filter
+- 🔄 Trailing Stop
+- 🛡️ Advanced Risk Management
+
+Uso:
+    python main.py
+    python main.py --dry-run # Solo señales, sin operar
+"""
+
+import argparse
+import signal
+import sys
+import threading
+import time as sleep_module
+from datetime import datetime
+
+import MetaTrader5 as mt5
+
+from config.settings import AccountConfig, BotConfig, DashboardConfig, TelegramConfig
+from core.risk_manager import RiskManager
+from core.position_manager import PositionManager
+from core.session_filter import SessionFilter
+from core.news_filter import NewsFilter
+from core.trailing_stop import TrailingStopManager
+from core.llm_oracle import GeminiOracle
+from strategy.ema_cross import EMACrossStrategy
+from utils.logger import BotLogger
+from utils.mt5_connector import MT5Connector
+from utils.telegram_notifier import TelegramNotifier
+from utils.trade_journal import TradeJournal
+from utils.state_manager import StateManager
+from dashboard.app import run_dashboard, update_dashboard_data, add_dashboard_log
+from utils.telegram_commands import TelegramCommandHandler
+from core.smc_scanner import SMCScanner
+from core.portfolio_manager import PortfolioManager
+from strategy.q_learning_agent import QLearningAgent
+from utils.telegram_commands import TelegramCommandHandler
+
+
+class TX3ProBot:
+    """
+    Bot principal profesional.
+    Integra todos los módulos de gestión, trading y monitoreo.
+    """
+
+    def __init__(self, dry_run: bool = False):
+        self.dry_run = dry_run
+        self.running = False
+        self.daily_reset_done = False
+        self.is_paused = False
+
+        # ─── Inicializar componentes ─────────────────────────────────
+        self.logger = BotLogger(name="TX3Bot")
+        self.connector = MT5Connector(logger=self.logger)
+        
+        # Notificaciones y Persistencia
+        self.telegram = TelegramNotifier(logger=self.logger)
+        self.telegram_commands = TelegramCommandHandler(logger=self.logger, bot_reference=self)
+        self.state_manager = StateManager(logger=self.logger)
+        self.journal = TradeJournal(logger=self.logger)
+
+        # Core Logic
+        self.risk_manager = RiskManager(logger=self.logger)
+        self.position_manager = PositionManager(logger=self.logger)
+        self.session_filter = SessionFilter(logger=self.logger)
+        
+        # Pro Features
+        self.news_filter = NewsFilter(logger=self.logger)
+        self.trailing_stop = TrailingStopManager(logger=self.logger)
+        self.oracle = GeminiOracle(logger=self.logger)
+        
+        # Next-Gen Institutional features
+        self.smc_scanner = SMCScanner(logger=self.logger)
+        self.portfolio_manager = PortfolioManager(logger=self.logger)
+        self.q_agent = QLearningAgent(logger=self.logger)
+        
+        # Estrategias (Multi-Symbol Optimization)
+        self.strategies = {}
+        for symbol in BotConfig.WATCHLIST:
+            self.strategies[symbol] = EMACrossStrategy(logger=self.logger, symbol=symbol)
+            self.logger.info(f"✅ Estrategia cargada: {symbol}")
+
+        # Cargar estado previo si existe
+        self._restore_state()
+
+        # Registrar señales de cierre
+        signal.signal(signal.SIGINT, self._handle_shutdown)
+        signal.signal(signal.SIGTERM, self._handle_shutdown)
+
+    def _restore_state(self):
+        """Intenta restaurar el estado del bot desde disco"""
+        state = self.state_manager.load_state()
+        if state:
+            try:
+                # Restaurar balance inicial real (capturado de MT5)
+                saved_balance = state.get("balance_inicial", 0)
+                if saved_balance > 0:
+                    self.risk_manager.balance_inicial = saved_balance
+                
+                # Restaurar equity inicio día (solo si es el mismo día)
+                saved_equity = state.get("equity_inicio_dia", 0)
+                if saved_equity > 0:
+                     self.risk_manager.equity_inicio_dia = saved_equity
+                
+                self.logger.success("Estado restaurado correctamente")
+            except Exception as e:
+                self.logger.error(f"Error restaurando estado parcial: {e}")
+
+    def _save_state(self):
+        """Guarda el estado actual a disco"""
+        state = self.state_manager.build_state(
+            balance_inicial=self.risk_manager.balance_inicial,
+            equity_inicio_dia=self.risk_manager.equity_inicio_dia,
+            trades_today=self.position_manager.trades_today,
+            is_daily_warning=self.risk_manager.is_daily_warning,
+            is_overall_warning=self.risk_manager.is_overall_warning,
+        )
+        self.state_manager.save_state(state)
+
+    def _handle_shutdown(self, signum, frame):
+        """Maneja el cierre limpio"""
+        self.logger.separator("═")
+        self.logger.warning("🛑 Señal de cierre recibida")
+        self.running = False
+
+    def _print_startup_banner(self):
+        """Muestra el banner de inicio"""
+        self.logger.banner("🤖 TX3 BOT - PROFESSIONAL")
+        self.logger.info(f"  Modo:          {'🔍 DRY RUN' if self.dry_run else '🟢 LIVE'}")
+        self.logger.info(f"  Estado:        {'⏸️ PAUSADO' if self.is_paused else '▶️ ACTIVO'}")
+        self.logger.info(f"  Dashboard:     http://{DashboardConfig.HOST}:{DashboardConfig.PORT}")
+        self.logger.info(f"  News Filter:   {'✅ Enabled' if self.news_filter.enabled else '❌ Disabled'}")
+        self.logger.info(f"  Trailing Stop: {'✅ Enabled' if self.trailing_stop.enabled else '❌ Disabled'}")
+        self.logger.separator("═")
+
+    def _update_dashboard(self):
+        """Envía datos actualizados al dashboard web"""
+        if not DashboardConfig.ENABLED:
+            return
+
+        account = self.connector.get_account_info()
+        positions = self.position_manager.get_open_positions()
+        
+        daily_dd = self.risk_manager.check_daily_drawdown()
+        overall_dd = self.risk_manager.check_overall_drawdown()
+        
+        # Formatear posiciones para JSON
+        pos_list = []
+        for p in positions:
+            pos_list.append({
+                "ticket": p.ticket,
+                "symbol": p.symbol,
+                "type": "BUY" if p.type == mt5.ORDER_TYPE_BUY else "SELL",
+                "volume": p.volume,
+                "price_open": p.price_open,
+                "profit": p.profit,
+                "sl": p.sl,
+                "tp": p.tp
+            })
+
+        # Calcular Win Rate rápido basado en el historial de trades cerrados hoy + abiertos
+        win_rate = 0.0
+        # Simplificación de win_rate visual (podrías guardarlo en un state si quisieras, aquí lo dejamos en 0.0 o aproximado si tuvieras history real)
+
+        data = {
+            "status": "PAUSED" if self.is_paused else ("RUNNING" if self.running else "STOPPED"),
+            "mode": "DEMO" if self.dry_run else "LIVE",
+            "kelly_fraction": BotConfig.KELLY_FRACTION,
+            "balance": account["balance"] if account else 0,
+            "equity": account["equity"] if account else 0,
+            "daily_dd": daily_dd["loss"],
+            "overall_dd": overall_dd["loss"],
+            "total_trades": self.position_manager.trades_today,
+            "win_rate": win_rate, 
+            "sys_mt5": self.connector.is_connected(),
+            "sys_oracle": self.oracle.system_ready if hasattr(self, 'oracle') else False,
+            "sys_news": self.news_filter.enabled if hasattr(self, 'news_filter') else False,
+            "open_positions": pos_list,
+            "last_update": datetime.now().strftime("%H:%M:%S")
+        }
+        update_dashboard_data(data)
+
+    def _check_daily_reset(self):
+        """Verifica reset diario (5 PM EST)"""
+        if self.session_filter.is_daily_reset_time():
+            if not self.daily_reset_done:
+                self.logger.banner("📅 RESET DIARIO - 5 PM EST")
+                
+                # Lógica de fin de día
+                self.risk_manager.reset_daily()
+                self.position_manager.reset_daily()
+
+                # Enviar resumen
+                self.telegram.notify_daily_summary(
+                    daily_dd=self.risk_manager.check_daily_drawdown()["loss"],
+                    overall_dd=self.risk_manager.check_overall_drawdown()["loss"],
+                    trades_today=self.position_manager.trades_today,
+                    win_rate=0.0 
+                )
+                
+                self.daily_reset_done = True
+                self._save_state()
+        else:
+            self.daily_reset_done = False
+
+    def _run_genetic_optimizer(self):
+        """Ejecuta la optimización genética en segundo plano"""
+        try:
+            import subprocess
+            import os
+            script_path = os.path.join(os.path.dirname(__file__), "scripts", "genetic_optimizer.py")
+            subprocess.run(["python", script_path], check=True)
+            self.logger.success("🧬 Mutación genética completada. Parámetros actualizados.")
+        except Exception as e:
+            self.logger.error(f"Error en Mutación Genética: {e}")
+
+    def _run_ml_trainer(self):
+        """Ejecuta el reentrenamiento del cerebro IA en segundo plano"""
+        try:
+            import subprocess
+            import os
+            script_path = os.path.join(os.path.dirname(__file__), "scripts", "train_ml_model.py")
+            subprocess.run(["python", script_path], check=True)
+            # Reinstanciar la estrategia con el nuevo cerebro
+            for symbol in BotConfig.WATCHLIST:
+                if type(self.strategies.get(symbol)).__name__ == "MLRandomForestStrategy":
+                    from strategy.ml_random_forest import MLRandomForestStrategy
+                    self.strategies[symbol] = MLRandomForestStrategy(logger=self.logger, symbol=symbol)
+            self.logger.success("🧠 Cerebro IA reentrenado y recargado en memoria.")
+        except Exception as e:
+            self.logger.error(f"Error entrenando IA: {e}")
+
+    def run(self):
+        """Loop principal"""
+        # 1. Iniciar Dashboard en thread
+        if DashboardConfig.ENABLED:
+            dash_thread = threading.Thread(
+                target=run_dashboard, 
+                args=(self.logger,), 
+                daemon=True
+            )
+            dash_thread.start()
+
+        self.telegram_commands.start()
+
+        # 2. Conexión y Setup
+        if not self.connector.connect():
+            self.logger.error("Fallo al conectar a MT5")
+            return
+            
+        # Check if any symbol from WATCHLIST is available
+        # This check was originally for self.strategy.symbol, now it needs to be adapted
+        # For simplicity, we'll just ensure connection and let individual symbol checks handle availability.
+        # if not self.connector.ensure_symbol_available(self.strategy.symbol):
+        #     self.logger.error(f"Símbolo {self.strategy.symbol} no disponible")
+        #     return
+
+        # ─── Capturar balance real de MT5 ──────────────────────────
+        account_info = mt5.account_info()
+        if account_info:
+            real_balance = account_info.balance
+            # Si no hay estado guardado previo, usar el balance real de MT5
+            # Si no hay estado guardado previo, usar el balance real de MT5
+            state = self.state_manager.load_state()
+            if state and state.get("balance_inicial", 0) > 0:
+                # Restaurar el balance inicial guardado previamente
+                initial_ref = state["balance_inicial"]
+                self.logger.info(f"💾 Balance inicial restaurado: ${initial_ref:,.2f}")
+            else:
+                # Primera ejecución: usar balance actual de MT5
+                initial_ref = real_balance
+                self.logger.info(f"🆕 Balance inicial capturado de MT5: ${initial_ref:,.2f}")
+            
+            # Propagar a todos los módulos
+            self.risk_manager.balance_inicial = initial_ref
+            
+            # Setup equity inicio día si es necesario
+            if self.risk_manager.equity_inicio_dia == AccountConfig.BALANCE_INICIAL:
+                self.risk_manager.equity_inicio_dia = max(real_balance, account_info.equity)
+        
+        self._print_startup_banner()
+        self.telegram.notify_bot_started(
+            dry_run=self.dry_run,
+            balance=real_balance if account_info else 0,
+            watchlist=BotConfig.WATCHLIST,
+        )
+
+        self.running = True
+        
+        while self.running:
+            try:
+                # ─── A. Monitoreo y Mantenimiento ──────────────────
+                if not self.connector.is_connected():
+                    self.logger.warning("Intentando reconexión a MT5...")
+                    if not self.connector.connect():
+                        sleep_module.sleep(30)
+                        continue
+                
+                self._check_daily_reset()
+                self._update_dashboard()
+                
+                # Guardado periódico
+                if datetime.now().minute % 5 == 0 and datetime.now().second < 5:
+                    self._save_state()
+                    
+                # ─── Mantenimiento Automático (ML y Mutación) ───────
+                now = datetime.now()
+                # Mutación genética (Sábado a la medianoche)
+                if now.weekday() == 5 and now.hour == 0 and now.minute == 0 and now.second < 30:
+                    if not hasattr(self, 'last_mutation_day') or self.last_mutation_day != now.day:
+                        self.logger.banner("🧬 Iniciando Auto-Mutación Genética Semanal...")
+                        threading.Thread(target=self._run_genetic_optimizer, daemon=True).start()
+                        self.last_mutation_day = now.day
+
+                # Reentrenamiento de Cerebro (Domingo a la medianoche)
+                if now.weekday() == 6 and now.hour == 0 and now.minute == 0 and now.second < 30:
+                    if not hasattr(self, 'last_training_day') or self.last_training_day != now.day:
+                        self.logger.banner("🧠 Iniciando Reentrenamiento de Cerebro IA Semanal...")
+                        threading.Thread(target=self._run_ml_trainer, daemon=True).start()
+                        self.last_training_day = now.day
+
+                # ─── B. Trailing Stop & Hedging ──────────────────────────────
+                self.trailing_stop.update_trailing_stops()
+                self.position_manager.manage_hedging()
+
+                # ─── C. Verificar Riesgo (Emergencia) ──────────────
+                if self.risk_manager.should_emergency_close():
+                    daily_dd = self.risk_manager.check_daily_drawdown()
+                    overall_dd = self.risk_manager.check_overall_drawdown()
+                    
+                    if daily_dd["level"] in ("EMERGENCY", "VIOLATED"):
+                        dd_type = "DIARIO"
+                        loss = daily_dd["loss"]
+                        limit = daily_dd["limit"]
+                    else:
+                        dd_type = "TOTAL"
+                        loss = overall_dd["loss"]
+                        limit = overall_dd["limit"]
+                        
+                    self.logger.critical(f"🚨 CIERRE DE EMERGENCIA ({dd_type})")
+                    self.telegram.notify_drawdown_emergency(dd_type, loss, limit)
+                    self.risk_manager.emergency_close_all()
+                    self.running = False
+                    break
+
+                # ─── C.1 Cierre Obligatorio de Fin de Semana ───────
+                if self.session_filter.is_friday_forced_close_time():
+                    # Evitar ejecutar cierre 2 veces si ya cerró
+                    if self.position_manager.get_open_positions_count() > 0:
+                        self.logger.critical("⏱️ CIERRE DE VIERNES (Evitando Weekend Hold)")
+                        self.telegram.notify_error("⏱️ CIERRE OBLIGATORIO DE VIERNES EJECUTADO")
+                        self.risk_manager.emergency_close_all() # Reutilizamos la función de emergencia para cerrar todo
+                    
+                    # No operamos por el resto del día de todos modos
+                    sleep_module.sleep(BotConfig.LOOP_INTERVAL_SECONDS)
+                    continue
+
+                # ─── D. Filtros de Trading ─────────────────────────
+                # 0. Telegram Pause
+                if self.is_paused:
+                    sleep_module.sleep(BotConfig.LOOP_INTERVAL_SECONDS)
+                    continue
+
+                # 1. Sesión (Global)
+                if not self.session_filter.is_trading_allowed():
+                    sleep_module.sleep(BotConfig.LOOP_INTERVAL_SECONDS)
+                    continue
+
+                # 2. Riesgo Global (Warning Levels)
+                if not self.risk_manager.is_safe_to_trade():
+                    sleep_module.sleep(BotConfig.LOOP_INTERVAL_SECONDS)
+                    continue
+
+                # ─── E. Loop por Símbolo (Diversificación) ─────────
+                for symbol in BotConfig.WATCHLIST:
+                    try:
+                        # b. Verificar Conexión con Símbolo
+                        if not self.connector.ensure_symbol_available(symbol):
+                            continue
+
+                        # c. Estrategia
+                        strategy = self.strategies[symbol]
+
+                        # Solo si no hemos llenado el cupo de posiciones
+                        if self.position_manager.get_open_positions_count() < BotConfig.MAX_OPEN_POSITIONS:
+                            signal = strategy.generate_signal()
+                            
+                            if signal:
+                                # a. Verificar Noticias por Símbolo con IA (Alineación Técnico vs Fundamental)
+                                if getattr(BotConfig, "NEWS_KILLZONES_ENABLED", True):
+                                    if not self.news_filter.is_safe_to_trade(symbol, signal['signal']):
+                                        continue
+                                
+                                # d. Verificar Escudo Anti-Correlación (Evitar pares múltiples muy atados)
+                                if not self.position_manager.check_correlation_shield(symbol):
+                                    continue
+                                    
+                                # SMC Detector (Order Blocks y Liquidez)
+                                if getattr(BotConfig, "SMC_ENABLED", False):
+                                    if not self.smc_scanner.scan_context(symbol, signal['signal']):
+                                        continue
+                                        
+                                # Q-Learning Agent (Intervención de Reinforcement Learning)
+                                if getattr(BotConfig, "Q_LEARNING_ENABLED", False):
+                                    state = (signal.get('adx', 20) > 18, signal['signal'])
+                                    rl_action = self.q_agent.decide(state, signal['signal'])
+                                    if rl_action == "HOLD":
+                                        continue
+                                    signal['signal'] = rl_action
+                                    
+                                # e. Juez Supremo: ORÁCULO LLM (Gemini)
+                                if self.oracle.enabled:
+                                    oracle_resp = self.oracle.evaluate_trade(
+                                        symbol=signal['symbol'],
+                                        signal_type=signal['signal'],
+                                        reason=signal.get('reason', 'Análisis Quant Base'),
+                                        adx=signal.get('adx', None)
+                                    )
+                                    if oracle_resp.get("decision") == "REJECTED":
+                                        self.logger.warning(f"🛑 Trade Cancelado por Oráculo (CIO): {oracle_resp.get('reason')}")
+                                        continue
+                                    else:
+                                        # Añadir la razón del oráculo al comentario del Trade
+                                        signal['reason'] += f" | 𓂀 {oracle_resp.get('reason')}"
+                                        signal['probability'] = oracle_resp.get('confidence', 50.0)
+                                        
+                                if self.dry_run:
+                                    self.logger.info(f"🔍 DRY RUN SIGNAL: {signal['signal']} {symbol}")
+                                else:
+                                    # Ejecutar orden con IA Sizing (Kelly Criterion si trae probabilidad)
+                                    order_type = mt5.ORDER_TYPE_BUY if signal['signal'] == 'BUY' else mt5.ORDER_TYPE_SELL
+                                    probability = signal.get("probability", None)
+                                    
+                                    # Multiplicador Volumétrico de Portafolio
+                                    port_weight = 1.0
+                                    if getattr(BotConfig, "PORTFOLIO_REBALANCING", False):
+                                        port_weight = self.portfolio_manager.get_weight(symbol)
+                                    
+                                    result = self.position_manager.place_order(
+                                        symbol=signal['symbol'],
+                                        order_type=order_type,
+                                        stop_loss_pips=signal['stop_loss_pips'],
+                                        take_profit_pips=signal['take_profit_pips'],
+                                        probability=probability,
+                                        portfolio_weight=port_weight
+                                    )
+                                    
+                                    if result:
+                                        # Registrar y Notificar
+                                        acc = mt5.account_info()
+                                        self.journal.record_open(
+                                            order_type=signal['signal'],
+                                            symbol=signal['symbol'],
+                                            volume=result['volume'],
+                                            price=result['price'],
+                                            sl=result['sl'],
+                                            tp=result['tp'],
+                                            sl_pips=signal['stop_loss_pips'],
+                                            tp_pips=signal['take_profit_pips'],
+                                            rr_ratio=signal['take_profit_pips']/signal['stop_loss_pips'],
+                                            balance=acc.balance,
+                                            equity=acc.equity,
+                                            daily_dd=self.risk_manager.check_daily_drawdown()["loss"],
+                                            overall_dd=self.risk_manager.check_overall_drawdown()["loss"],
+                                            session=self.session_filter.get_current_session(),
+                                            strategy=strategy.get_name(),
+                                            reason=signal.get('reason', '')
+                                        )
+                                        self.telegram.notify_trade_opened(
+                                            order_type=signal['signal'],
+                                            symbol=signal['symbol'],
+                                            volume=result['volume'],
+                                            price=result['price'],
+                                            sl=result['sl'],
+                                            tp=result['tp'],
+                                            sl_pips=signal['stop_loss_pips'],
+                                            tp_pips=signal['take_profit_pips'],
+                                            rr_ratio=signal['take_profit_pips']/signal['stop_loss_pips']
+                                        )
+                    except Exception as e:
+                        self.logger.error(f"Error procesando {symbol}: {e}")
+                        continue
+
+                sleep_module.sleep(BotConfig.LOOP_INTERVAL_SECONDS)
+
+            except KeyboardInterrupt:
+                self.running = False
+                break
+            except Exception as e:
+                self.logger.error(f"Error en loop principal: {e}")
+                self.telegram.notify_error(str(e))
+                sleep_module.sleep(10)
+
+        self._shutdown()
+
+    def _shutdown(self):
+        """Cierre limpio"""
+        self.logger.banner("🛑 DETENIENDO BOT")
+        self._save_state()
+        
+        try:
+            acc = self.connector.get_account_info()
+            if acc:
+                self.telegram.notify_bot_stopped("Shutdown manual", acc['balance'], acc['profit'])
+        except Exception:
+            pass
+        
+        self.connector.disconnect()
+        self.logger.info("Bot apagado correctamente. Bye! 👋")
+
+
+def main():
+    parser = argparse.ArgumentParser(description="TX3 Bot Professional")
+    parser.add_argument("--dry-run", action="store_true", help="Simulation mode")
+    args = parser.parse_args()
+
+    bot = TX3ProBot(dry_run=args.dry_run)
+    bot.run()
+
+
+if __name__ == "__main__":
+    main()

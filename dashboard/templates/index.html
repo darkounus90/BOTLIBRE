@@ -1,0 +1,735 @@
+<!DOCTYPE html>
+<html lang="es" class="dark">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>TX3 Pro Bot | Mission Control</title>
+    <!-- Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link
+        href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;700&display=swap"
+        rel="stylesheet">
+
+    <!-- External Libs -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.0.1/socket.io.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+    <!-- Tailwind Config -->
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    fontFamily: {
+                        sans: ['Outfit', 'sans-serif'],
+                        mono: ['JetBrains Mono', 'monospace'],
+                    },
+                    colors: {
+                        txbase: '#0B0F19',
+                        txpanel: 'rgba(17, 24, 39, 0.7)',
+                        txborder: 'rgba(55, 65, 81, 0.4)',
+                        txaccent: '#3B82F6',
+                        txdanger: '#EF4444',
+                        txsuccess: '#10B981',
+                        txwarning: '#F59E0B'
+                    },
+                    animation: {
+                        'pulse-slow': 'pulse 3s cubic-bezier(0.4, 0, 0.6, 1) infinite',
+                        'float': 'float 6s ease-in-out infinite',
+                    },
+                    keyframes: {
+                        float: {
+                            '0%, 100%': { transform: 'translateY(0)' },
+                            '50%': { transform: 'translateY(-10px)' },
+                        }
+                    }
+                }
+            }
+        }
+    </script>
+
+    <style>
+        body {
+            background-color: #0B0F19;
+            color: #E2E8F0;
+            background-image:
+                radial-gradient(circle at 15% 50%, rgba(29, 78, 216, 0.15), transparent 25%),
+                radial-gradient(circle at 85% 30%, rgba(139, 92, 246, 0.15), transparent 25%);
+            background-attachment: fixed;
+            overflow-x: hidden;
+        }
+
+        /* Glassmorphism Classes */
+        .glass-panel {
+            background: var(--txpanel, rgba(17, 24, 39, 0.6));
+            backdrop-filter: blur(12px);
+            -webkit-backdrop-filter: blur(12px);
+            border: 1px solid var(--txborder, rgba(55, 65, 81, 0.4));
+            box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.3);
+            border-radius: 1rem;
+            transition: transform 0.3s ease, box-shadow 0.3s ease;
+        }
+
+        .glass-panel:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 12px 40px 0 rgba(0, 0, 0, 0.4);
+            border-color: rgba(59, 130, 246, 0.3);
+        }
+
+        /* Specific text gradients */
+        .text-gradient {
+            background-clip: text;
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        .gradient-blue {
+            background-image: linear-gradient(to right, #60A5FA, #3B82F6);
+        }
+
+        .gradient-green {
+            background-image: linear-gradient(to right, #34D399, #10B981);
+        }
+
+        .gradient-red {
+            background-image: linear-gradient(to right, #F87171, #EF4444);
+        }
+
+        /* Custom Scrollbar for Logs */
+        ::-webkit-scrollbar {
+            width: 6px;
+            height: 6px;
+        }
+
+        ::-webkit-scrollbar-track {
+            background: rgba(15, 23, 42, 0.5);
+            border-radius: 4px;
+        }
+
+        ::-webkit-scrollbar-thumb {
+            background: rgba(55, 65, 81, 0.8);
+            border-radius: 4px;
+        }
+
+        ::-webkit-scrollbar-thumb:hover {
+            background: rgba(75, 85, 99, 1);
+        }
+
+        /* Log Entries */
+        .log-entry {
+            padding: 6px 10px;
+            border-radius: 6px;
+            margin-bottom: 4px;
+            font-size: 0.85rem;
+            line-height: 1.4;
+            transition: background-color 0.2s;
+        }
+
+        .log-entry:hover {
+            background-color: rgba(255, 255, 255, 0.03);
+        }
+
+        .glow-dot {
+            box-shadow: 0 0 10px currentColor;
+        }
+    </style>
+</head>
+
+<body class="min-h-screen p-4 md:p-8 flex flex-col items-center">
+
+    <!-- Main Container -->
+    <div class="w-full max-w-7xl space-y-8 animate-fade-in-up">
+
+        <!-- Navbar / Header -->
+        <header
+            class="glass-panel p-6 flex flex-col md:flex-row justify-between items-center gap-4 relative overflow-hidden">
+            <!-- Decorative light sweep -->
+            <div
+                class="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-transparent via-blue-500 to-transparent opacity-50">
+            </div>
+
+            <div class="flex items-center gap-4">
+                <div
+                    class="w-12 h-12 rounded-xl bg-gradient-to-br from-blue-600 to-indigo-900 flex items-center justify-center shadow-lg shadow-blue-500/30">
+                    <svg class="w-7 h-7 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                            d="M13 10V3L4 14h7v7l9-11h-7z"></path>
+                    </svg>
+                </div>
+                <div>
+                    <h1 class="text-3xl font-bold tracking-tight text-white">TX3 Pro <span
+                            class="text-blue-500 font-light">$50K</span></h1>
+                    <p class="text-sm text-gray-400 font-mono tracking-wider mt-1">MISSION CONTROL SYSTEM</p>
+                </div>
+            </div>
+
+            <div class="flex items-center gap-3">
+                <div id="mode-badge"
+                    class="px-4 py-1.5 rounded-lg text-sm font-bold bg-purple-500/10 text-purple-400 border border-purple-500/20 shadow-[0_0_15px_rgba(168,85,247,0.15)] hidden md:block">
+                    LIVE
+                </div>
+                <div id="phase-badge"
+                    class="px-4 py-1.5 rounded-lg text-sm font-bold bg-indigo-500/10 text-indigo-400 border border-indigo-500/20 shadow-[0_0_15px_rgba(99,102,241,0.15)]">
+                    FASE ?
+                </div>
+                <div id="status-badge"
+                    class="px-4 py-1.5 rounded-lg text-sm font-bold bg-gray-500/10 text-gray-400 border border-gray-500/20">
+                    WAITING...
+                </div>
+            </div>
+        </header>
+
+        <!-- System Health Row -->
+        <div class="flex flex-wrap gap-4 text-xs font-mono mb-2">
+            <div id="health-mt5"
+                class="flex items-center gap-2 bg-gray-900/40 px-3 py-1.5 rounded-md border border-gray-800 text-gray-500 transition-all">
+                <span class="w-2 h-2 rounded-full bg-gray-500 transition-all"></span> MT5 BROKER
+            </div>
+            <div id="health-oracle"
+                class="flex items-center gap-2 bg-gray-900/40 px-3 py-1.5 rounded-md border border-gray-800 text-gray-500 transition-all">
+                <span class="w-2 h-2 rounded-full bg-gray-500 transition-all"></span> GEMINI ORACLE
+            </div>
+            <div id="health-nlp"
+                class="flex items-center gap-2 bg-gray-900/40 px-3 py-1.5 rounded-md border border-gray-800 text-gray-500 transition-all">
+                <span class="w-2 h-2 rounded-full bg-gray-500 transition-all"></span> NLP ENGINE
+            </div>
+            <div id="health-sim50k"
+                class="flex items-center gap-2 bg-gray-900/40 px-3 py-1.5 rounded-md border border-gray-800 text-gray-500 hidden transition-all">
+                <span class="w-2 h-2 rounded-full bg-blue-500 glow-dot animate-pulse"></span> 50K SIMULATOR
+            </div>
+        </div>
+
+        <!-- KPI Dashboard Grid -->
+        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+
+            <!-- Balance Card -->
+            <div class="glass-panel p-6 relative overflow-hidden group">
+                <div
+                    class="absolute -right-6 -top-6 w-24 h-24 bg-blue-500/10 rounded-full blur-2xl group-hover:bg-blue-500/20 transition-all">
+                </div>
+                <h3 class="text-xs font-bold text-gray-400 uppercase tracking-widest mb-1">Account Balance</h3>
+                <div class="text-3xl font-bold text-white tracking-tight" id="balance">$0.00</div>
+                <div class="mt-3 flex items-center justify-between text-sm border-t border-gray-800 pt-3">
+                    <span class="text-gray-500">Equity Live</span>
+                    <span class="font-mono text-blue-400 font-medium" id="equity">$0.00</span>
+                </div>
+            </div>
+
+            <!-- Profit Card -->
+            <div class="glass-panel p-6 relative overflow-hidden group">
+                <div
+                    class="absolute -right-6 -top-6 w-24 h-24 bg-green-500/10 rounded-full blur-2xl group-hover:bg-green-500/20 transition-all">
+                </div>
+                <h3 class="text-xs font-bold text-gray-400 uppercase tracking-widest mb-1">Daily Profit</h3>
+                <div class="text-3xl font-bold text-gray-500" id="daily-profit">$0.00</div>
+                <div class="mt-3 flex flex-col gap-1 border-t border-gray-800 pt-3">
+                    <div class="flex justify-between text-xs text-gray-500">
+                        <span>Progress</span>
+                        <span id="daily-pct-text">0.0%</span>
+                    </div>
+                    <div class="w-full bg-gray-800/80 rounded-full h-1.5 overflow-hidden">
+                        <div class="bg-gradient-to-r from-emerald-400 to-green-500 h-full rounded-full transition-all duration-1000 ease-out shadow-[0_0_10px_rgba(16,185,129,0.5)]"
+                            style="width: 0%" id="daily-progress"></div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Daily DD Card -->
+            <div class="glass-panel p-6 relative overflow-hidden group">
+                <div
+                    class="absolute -right-6 -top-6 w-24 h-24 bg-orange-500/10 rounded-full blur-2xl group-hover:bg-orange-500/20 transition-all">
+                </div>
+                <div class="flex justify-between items-start">
+                    <h3 class="text-xs font-bold text-gray-400 uppercase tracking-widest mb-1">Daily Drawdown</h3>
+                    <span class="text-[0.65rem] border border-gray-700 text-gray-400 px-2 py-0.5 rounded-md">LIMIT
+                        5%</span>
+                </div>
+                <div class="text-3xl font-bold text-orange-400 tracking-tight" id="daily-dd">$0.00</div>
+                <div
+                    class="mt-3 w-full bg-gray-800/80 rounded-full h-1.5 overflow-hidden border-t border-gray-800 pt-4">
+                    <div class="bg-gradient-to-r from-orange-400 to-red-500 h-1.5 rounded-full transition-all duration-1000 ease-out shadow-[0_0_10px_rgba(249,115,22,0.5)]"
+                        style="width: 0%" id="daily-dd-bar"></div>
+                </div>
+            </div>
+
+            <!-- Total DD Card -->
+            <div class="glass-panel p-6 relative overflow-hidden group">
+                <div
+                    class="absolute -right-6 -top-6 w-24 h-24 bg-red-500/10 rounded-full blur-2xl group-hover:bg-red-500/20 transition-all">
+                </div>
+                <div class="flex justify-between items-start">
+                    <h3 class="text-xs font-bold text-gray-400 uppercase tracking-widest mb-1">Max Drawdown</h3>
+                    <span class="text-[0.65rem] border border-gray-700 text-gray-400 px-2 py-0.5 rounded-md">LIMIT
+                        10%</span>
+                </div>
+                <div class="text-3xl font-bold text-red-400 tracking-tight" id="overall-dd">$0.00</div>
+                <div
+                    class="mt-3 w-full bg-gray-800/80 rounded-full h-1.5 overflow-hidden border-t border-gray-800 pt-4">
+                    <div class="bg-gradient-to-r from-red-600 to-rose-500 h-1.5 rounded-full transition-all duration-1000 ease-out shadow-[0_0_10px_rgba(225,29,72,0.5)]"
+                        style="width: 0%" id="overall-dd-bar"></div>
+                </div>
+            </div>
+
+        </div>
+
+        <!-- Middle Analytics Section Grid -->
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+            <!-- Equity Curve Chart -->
+            <div class="glass-panel col-span-1 md:col-span-2 p-5 flex flex-col min-h-[250px] relative overflow-hidden">
+                <div class="flex justify-between items-center mb-4 relative z-10">
+                    <h3 class="text-sm font-bold text-gray-200 tracking-widest uppercase flex items-center gap-2">
+                        <svg class="w-4 h-4 text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                d="M7 12l3-3 3 3 4-4M8 21l4-4 4 4M3 4h18M4 4h16v12a1 1 0 01-1 1H5a1 1 0 01-1-1V4z">
+                            </path>
+                        </svg>
+                        Bot Equity Curve (Live)
+                    </h3>
+                </div>
+                <!-- Div with explicit height constraints so the canvas doesn't expand infinitely -->
+                <div class="flex-grow relative w-full h-[200px]"
+                    style="position: relative; height: 200px; width: 100%;">
+                    <canvas id="equityChart"></canvas>
+                </div>
+            </div>
+
+            <!-- Complex Stats Tracker -->
+            <div class="glass-panel p-5 flex flex-col min-h-[250px] justify-between relative overflow-hidden group">
+                <div class="absolute -right-6 -top-6 w-32 h-32 bg-indigo-500/10 rounded-full blur-2xl transition-all">
+                </div>
+                <div>
+                    <h3
+                        class="text-sm font-bold text-gray-200 tracking-widest uppercase border-b border-gray-800 pb-2 mb-4 relative z-10">
+                        Phase Progress</h3>
+
+                    <div class="flex justify-between items-center mb-3 text-sm relative z-10">
+                        <span class="text-gray-400">Profit Target</span>
+                        <span class="font-mono font-bold text-blue-400" id="stat-target">$0.00</span>
+                    </div>
+
+                    <div class="flex justify-between items-center mb-3 text-sm relative z-10">
+                        <span class="text-gray-400">Días Rentables</span>
+                        <span class="font-mono font-bold text-gray-200"><span id="stat-days" class="text-white">0</span>
+                            <span class="text-gray-600">/ 0</span></span>
+                    </div>
+
+                    <div class="flex justify-between items-center mb-3 text-sm relative z-10">
+                        <span class="text-gray-400">Consistencia (40%)</span>
+                        <span
+                            class="text-xs px-2 py-0.5 rounded-md font-bold bg-gray-500/10 text-gray-400 border border-gray-500/20 shadow-sm"
+                            id="stat-consistency">ESPERANDO</span>
+                    </div>
+
+                    <div
+                        class="flex justify-between items-center text-sm relative z-10 mt-4 border-t border-gray-800 pt-3">
+                        <span class="text-gray-400">Win Rate <span
+                                class="text-[0.6rem] ml-1 bg-gray-800 px-1 py-0.5 rounded text-gray-400">ESTIMADO</span></span>
+                        <span class="font-mono font-bold text-purple-400" id="stat-winrate">0.0%</span>
+                    </div>
+                </div>
+
+                <div class="flex gap-4 mt-4 relative z-10 w-full">
+                    <div
+                        class="bg-gray-900/60 p-3 rounded-lg border border-gray-800 flex-1 flex flex-col justify-center items-center">
+                        <span
+                            class="text-[0.65rem] text-gray-500 uppercase tracking-widest font-bold mb-1 text-center leading-tight">Trades<br>Hoy</span>
+                        <span class="text-xl font-mono font-bold text-white drop-shadow-[0_0_8px_rgba(255,255,255,0.3)]"
+                            id="stat-trades">0</span>
+                    </div>
+                    <div
+                        class="bg-gray-900/60 p-3 rounded-lg border border-gray-800 flex-1 flex flex-col justify-center items-center">
+                        <span
+                            class="text-[0.65rem] text-gray-500 uppercase tracking-widest font-bold mb-1 text-center leading-tight">Kelly<br>Frac.</span>
+                        <span class="text-xl font-mono font-bold text-white drop-shadow-[0_0_8px_rgba(255,255,255,0.3)]"
+                            id="stat-kelly">0.25</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Lower Section Grid -->
+        <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+
+            <!-- Open Positions Table -->
+            <div class="glass-panel col-span-2 flex flex-col overflow-hidden">
+                <div class="p-5 border-b border-gray-800 bg-gray-900/40 flex justify-between items-center">
+                    <div class="flex items-center gap-3">
+                        <div
+                            class="w-8 h-8 rounded-lg bg-blue-500/10 flex items-center justify-center border border-blue-500/20">
+                            <svg class="w-4 h-4 text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                    d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6"></path>
+                            </svg>
+                        </div>
+                        <h3 class="text-lg font-bold text-white tracking-wide">Live Positions</h3>
+                    </div>
+                    <span class="text-xs text-gray-500 font-mono" id="positions-count">Active: 0</span>
+                </div>
+
+                <div class="overflow-x-auto flex-1 p-2">
+                    <table class="w-full text-sm text-left align-middle">
+                        <thead class="text-xs text-gray-500 font-mono tracking-wider border-b border-gray-800/50">
+                            <tr>
+                                <th class="px-4 py-3 font-medium">TICKET</th>
+                                <th class="px-4 py-3 font-medium">ASSET</th>
+                                <th class="px-4 py-3 font-medium">DIRECTION</th>
+                                <th class="px-4 py-3 font-medium">LOTS</th>
+                                <th class="px-4 py-3 font-medium">ENTRY</th>
+                                <th class="px-4 py-3 font-medium text-right">PROFIT</th>
+                            </tr>
+                        </thead>
+                        <tbody id="positions-table" class="font-mono text-sm">
+                            <tr>
+                                <td colspan="6" class="text-center py-12 text-gray-600">No active positions currently
+                                </td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- Terminal / Live Logs -->
+            <div class="glass-panel h-[400px] flex flex-col overflow-hidden">
+                <div class="p-4 border-b border-gray-800 bg-gray-900/60 flex justify-between items-center">
+                    <div class="flex items-center gap-2">
+                        <svg class="w-5 h-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                d="M8 9l3 3-3 3m5 0h3M5 20h14a2 2 0 002-2V6a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z">
+                            </path>
+                        </svg>
+                        <h3 class="text-sm font-bold text-gray-200 tracking-widest uppercase">System Terminal</h3>
+                    </div>
+                </div>
+
+                <div id="logs-container"
+                    class="flex-1 overflow-y-auto p-4 font-mono bg-[#050510] shadow-inner space-y-1.5 scroll-smooth">
+                    <!-- Logs injected via JS -->
+                    <div class="log-entry text-gray-500 italic">Initializing subsystem...</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Footer -->
+        <footer class="flex justify-between items-center text-xs font-mono text-gray-500 pt-4 px-2">
+            <div id="connection-status"
+                class="flex items-center gap-3 bg-gray-900/50 px-3 py-1.5 rounded-full border border-gray-800">
+                <span class="inline-block w-2.5 h-2.5 rounded-full bg-gray-600"></span>
+                <span>SYSTEM OFFLINE</span>
+            </div>
+            <div id="last-update-time" class="tracking-widest opacity-60">SYNC: --:--:--</div>
+        </footer>
+
+    </div>
+
+    <!-- Application Logic -->
+    <script>
+        const socket = io();
+        let isConnected = false;
+
+        const formatCurrency = (val) => {
+            return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', minimumFractionDigits: 2 }).format(val || 0);
+        };
+
+        // Initialize Chart.js safely
+        let equityChart = null;
+        function initChart() {
+            const ctx = document.getElementById('equityChart');
+            if (!ctx) return;
+
+            Chart.defaults.color = "rgba(156, 163, 175, 0.7)";
+            Chart.defaults.font.family = "'JetBrains Mono', monospace";
+
+            equityChart = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: [], // Timestamps
+                    datasets: [{
+                        label: 'Live Equity',
+                        data: [], // Values
+                        borderColor: '#3B82F6',
+                        backgroundColor: 'rgba(59, 130, 246, 0.1)',
+                        borderWidth: 2,
+                        pointRadius: 0, // hide dots for cleaner look
+                        pointHoverRadius: 4,
+                        fill: true,
+                        tension: 0.4
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: { display: false },
+                        tooltip: {
+                            mode: 'index',
+                            intersect: false,
+                            backgroundColor: 'rgba(17, 24, 39, 0.9)',
+                            titleColor: '#9CA3AF',
+                            bodyColor: '#fff',
+                            borderColor: 'rgba(59, 130, 246, 0.3)',
+                            borderWidth: 1,
+                            callbacks: {
+                                label: function (context) {
+                                    return ' Equity: ' + formatCurrency(context.parsed.y);
+                                }
+                            }
+                        }
+                    },
+                    scales: {
+                        x: {
+                            grid: { display: false, drawBorder: false },
+                            ticks: { maxTicksLimit: 5, autoSkip: true }
+                        },
+                        y: {
+                            grid: { color: 'rgba(55, 65, 81, 0.3)', drawBorder: false },
+                            ticks: {
+                                callback: function (value) { return '$' + value; },
+                                maxTicksLimit: 5
+                            }
+                        }
+                    },
+                    interaction: { mode: 'nearest', axis: 'x', intersect: false }
+                }
+            });
+        }
+
+        // Ejecutar inicializacion del chart al cargar
+        document.addEventListener('DOMContentLoaded', initChart);
+
+        function setConnectionStatus(connected) {
+            isConnected = connected;
+            const el = document.getElementById('connection-status');
+            if (connected) {
+                el.innerHTML = '<span class="inline-block w-2.5 h-2.5 rounded-full bg-emerald-500 glow-dot animate-pulse"></span><span class="text-emerald-500 font-bold">LIVE SOCKET</span>';
+                el.classList.add('border-emerald-500/30', 'bg-emerald-500/5');
+            } else {
+                el.innerHTML = '<span class="inline-block w-2.5 h-2.5 rounded-full bg-rose-500"></span><span class="text-rose-500">POLLING BACKUP</span>';
+                el.classList.remove('border-emerald-500/30', 'bg-emerald-500/5');
+            }
+        }
+
+        function updateUI(data) {
+            if (!data || typeof data !== 'object') return;
+
+            // Sync Time
+            document.getElementById('last-update-time').textContent = `SYNC: ${data.last_update || new Date().toLocaleTimeString()}`;
+
+            // Phase, Mode and Status
+            const phaseBadge = document.getElementById('phase-badge');
+            phaseBadge.textContent = `PHASE ${data.phase || '?'}`;
+
+            if (data.mode) {
+                const modeBadge = document.getElementById('mode-badge');
+                if (modeBadge) {
+                    modeBadge.textContent = data.mode;
+                    if (data.mode === 'DEMO') {
+                        modeBadge.className = "px-4 py-1.5 rounded-lg text-sm font-bold bg-blue-500/10 text-blue-400 border border-blue-500/20 hidden md:block";
+                    } else {
+                        modeBadge.className = "px-4 py-1.5 rounded-lg text-sm font-bold bg-purple-500/10 text-purple-400 border border-purple-500/20 shadow-[0_0_15px_rgba(168,85,247,0.15)] hidden md:block";
+                    }
+                }
+            }
+
+            const statusEl = document.getElementById('status-badge');
+            statusEl.textContent = data.status || 'UNKNOWN';
+            if (data.status === 'RUNNING') {
+                statusEl.className = "px-4 py-1.5 rounded-lg text-sm font-bold bg-emerald-500/10 text-emerald-400 border border-emerald-500/30 shadow-[0_0_15px_rgba(16,185,129,0.1)]";
+            } else if (data.status === 'PAUSED') {
+                statusEl.className = "px-4 py-1.5 rounded-lg text-sm font-bold bg-amber-500/10 text-amber-400 border border-amber-500/30 shadow-[0_0_15px_rgba(245,158,11,0.1)]";
+            } else {
+                statusEl.className = "px-4 py-1.5 rounded-lg text-sm font-bold bg-rose-500/10 text-rose-400 border border-rose-500/30";
+            }
+
+            // Financial KPIs
+            document.getElementById('balance').textContent = formatCurrency(data.balance);
+            document.getElementById('equity').textContent = formatCurrency(data.equity);
+
+            // Daily Profit Logic
+            const dpEl = document.getElementById('daily-profit');
+            const dailyVal = data.daily_profit || 0;
+            dpEl.textContent = formatCurrency(dailyVal);
+            if (dailyVal > 0) {
+                dpEl.className = "text-3xl font-bold text-gradient gradient-green tracking-tight";
+            } else if (dailyVal < 0) {
+                dpEl.className = "text-3xl font-bold text-gradient gradient-red tracking-tight";
+            } else {
+                dpEl.className = "text-3xl font-bold text-gray-500 tracking-tight";
+            }
+
+            // Drawdowns
+            document.getElementById('daily-dd').textContent = formatCurrency(data.daily_dd);
+            document.getElementById('overall-dd').textContent = formatCurrency(data.overall_dd);
+
+            // Progress bars (Assumes Phase 1 limit of 2500 & 5000)
+            const dpt = ((data.daily_dd || 0) / 2500) * 100;
+            document.getElementById('daily-dd-bar').style.width = `${Math.min(dpt, 100)}%`;
+
+            const opt = ((data.overall_dd || 0) / 5000) * 100;
+            document.getElementById('overall-dd-bar').style.width = `${Math.min(opt, 100)}%`;
+
+            // Advanced Stats
+            if (data.profit_target) document.getElementById('stat-target').textContent = formatCurrency(data.profit_target);
+            if (data.min_days !== undefined) document.getElementById('stat-days').innerHTML = `<span class="text-white">${data.profitable_days || 0}</span> <span class="text-gray-600">/ ${data.min_days}</span>`;
+            if (data.total_trades !== undefined) document.getElementById('stat-trades').textContent = data.total_trades;
+            if (data.win_rate !== undefined) document.getElementById('stat-winrate').textContent = `${(data.win_rate).toFixed(1)}%`;
+            if (data.kelly_fraction !== undefined) {
+                const kellyEl = document.getElementById('stat-kelly');
+                if (kellyEl) kellyEl.textContent = data.kelly_fraction.toFixed(2);
+            }
+
+            if (data.consistency_met !== undefined) {
+                const conEl = document.getElementById('stat-consistency');
+                if (data.consistency_met) {
+                    conEl.textContent = '✔️ OK';
+                    conEl.className = 'text-xs px-2 py-0.5 rounded-md font-bold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 shadow-sm';
+                } else {
+                    conEl.textContent = '❌ PELIGRO';
+                    conEl.className = 'text-xs px-2 py-0.5 rounded-md font-bold bg-rose-500/10 text-rose-400 border border-rose-500/20 shadow-sm';
+                }
+            }
+
+            // System Health Updates
+            const updateHealth = (id, isOnline, isSim) => {
+                const el = document.getElementById(id);
+                if (!el) return;
+                const dot = el.querySelector('span');
+
+                if (isSim) {
+                    if (isOnline) {
+                        el.classList.remove('hidden');
+                        el.className = 'flex items-center gap-2 bg-blue-500/10 px-3 py-1.5 rounded-md border border-blue-500/30 text-blue-400 transition-all';
+                    } else {
+                        el.classList.add('hidden');
+                    }
+                    return;
+                }
+
+                if (isOnline) {
+                    dot.className = 'w-2 h-2 rounded-full bg-emerald-500 glow-dot animate-pulse';
+                    el.className = 'flex items-center gap-2 bg-emerald-500/10 px-3 py-1.5 rounded-md border border-emerald-500/30 text-emerald-400 transition-all font-bold';
+                } else {
+                    dot.className = 'w-2 h-2 rounded-full bg-rose-500';
+                    el.className = 'flex items-center gap-2 bg-rose-500/10 px-3 py-1.5 rounded-md border border-rose-500/30 text-rose-400 transition-all font-bold';
+                }
+            };
+
+            if (data.sys_mt5 !== undefined) updateHealth('health-mt5', data.sys_mt5);
+            if (data.sys_oracle !== undefined) updateHealth('health-oracle', data.sys_oracle);
+            if (data.sys_news !== undefined) updateHealth('health-nlp', data.sys_news);
+            if (data.simulate_50k !== undefined) updateHealth('health-sim50k', data.simulate_50k, true);
+
+            // Update Equity Chart
+            if (equityChart && data.equity_history && data.equity_history.length > 0) {
+                const labels = data.equity_history.map(pt => pt.time);
+                const eqData = data.equity_history.map(pt => pt.equity);
+
+                equityChart.data.labels = labels;
+                equityChart.data.datasets[0].data = eqData;
+                equityChart.update('none'); // silent update without huge animations
+            }
+
+            // Positions Table
+            const tbody = document.getElementById('positions-table');
+            const pCount = document.getElementById('positions-count');
+
+            if (data.open_positions && data.open_positions.length > 0) {
+                tbody.innerHTML = '';
+                pCount.textContent = `Active: ${data.open_positions.length}`;
+
+                data.open_positions.forEach(pos => {
+                    const row = document.createElement('tr');
+                    const isBuy = pos.type === 'BUY';
+                    const isProfitable = pos.profit >= 0;
+
+                    row.className = 'border-b border-gray-800/40 hover:bg-gray-800/40 transition-colors group';
+                    row.innerHTML = `
+                        <td class="px-4 py-3 text-gray-400">#${pos.ticket}</td>
+                        <td class="px-4 py-3 font-bold text-white group-hover:text-blue-400 transition-colors">${pos.symbol}</td>
+                        <td class="px-4 py-3">
+                            <span class="px-2 py-1 rounded text-[0.7rem] font-bold ${isBuy ? 'bg-blue-500/10 text-blue-400 border border-blue-500/20' : 'bg-orange-500/10 text-orange-400 border border-orange-500/20'}">
+                                ${pos.type}
+                            </span>
+                        </td>
+                        <td class="px-4 py-3 text-gray-300">${pos.volume.toFixed(2)}</td>
+                        <td class="px-4 py-3 text-gray-400">${pos.price_open}</td>
+                        <td class="px-4 py-3 text-right font-bold ${isProfitable ? 'text-emerald-400' : 'text-rose-400'}">
+                            ${isProfitable ? '+' : ''}${formatCurrency(pos.profit)}
+                        </td>
+                    `;
+                    tbody.appendChild(row);
+                });
+            } else {
+                pCount.textContent = 'Active: 0';
+                tbody.innerHTML = '<tr><td colspan="6" class="text-center py-12 text-gray-600">No active positions currently</td></tr>';
+            }
+        }
+
+        function addLogEntry(log) {
+            const container = document.getElementById('logs-container');
+            const el = document.createElement('div');
+
+            let colorClass = 'text-gray-400';
+            const msg = log.message || '';
+
+            // Smart log coloring
+            if (msg.includes('ERROR') || msg.includes('🚨') || msg.includes('❌') || msg.includes('🛑')) {
+                colorClass = 'text-rose-400 bg-rose-500/5 border-l-2 border-rose-500';
+            } else if (msg.includes('WARNING') || msg.includes('⚠️') || msg.includes('⏱️')) {
+                colorClass = 'text-amber-400 bg-amber-500/5 border-l-2 border-amber-500';
+            } else if (msg.includes('SUCCESS') || msg.includes('✅') || msg.includes('🚀') || msg.includes('💰')) {
+                colorClass = 'text-emerald-400 border-l-2 border-emerald-500 pl-2';
+            } else if (msg.includes('BUY') || msg.includes('SELL') || msg.includes('Trade')) {
+                colorClass = 'text-blue-300 border-l-2 border-blue-500 pl-2';
+            } else {
+                colorClass = 'text-gray-400 pl-2 border-l-2 border-gray-700';
+            }
+
+            el.className = `log-entry ${colorClass} font-mono`;
+
+            // Format timestamp slightly dimmer than text
+            const timeStr = log.timestamp ? `<span class="text-gray-600 mr-2 text-[0.7rem]">[${log.timestamp}]</span>` : '';
+            el.innerHTML = `${timeStr}<span>${msg}</span>`;
+
+            container.appendChild(el);
+
+            // Auto scroll to bottom
+            container.scrollTop = container.scrollHeight;
+
+            // Limit logs in DOM to prevent lag (keep last 100)
+            if (container.children.length > 100) {
+                container.removeChild(container.firstChild);
+            }
+        }
+
+        // ── WebSocket Initialization ──────────────────────────────
+        socket.on('connect', () => { setConnectionStatus(true); });
+        socket.on('disconnect', () => { setConnectionStatus(false); });
+        socket.on('update', (data) => { updateUI(data); });
+        socket.on('log', (log) => { addLogEntry(log); });
+
+        // ── Polling Fallback ──────────────────────────────────────
+        async function fetchStatus() {
+            try {
+                const res = await fetch('/api/status');
+                const data = await res.json();
+                updateUI(data);
+
+                if (data.logs && data.logs.length > 0) {
+                    const container = document.getElementById('logs-container');
+                    if (container.children.length <= 1) { // Only if relatively empty
+                        container.innerHTML = '';
+                        data.logs.forEach(log => addLogEntry(log));
+                    }
+                }
+            } catch (err) { console.warn('API fetch failed:', err); }
+        }
+
+        fetchStatus();
+        setInterval(() => { if (!isConnected) fetchStatus(); }, 5000);
+    </script>
+</body>
+
+</html>
