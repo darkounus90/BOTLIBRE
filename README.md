@@ -1,6 +1,6 @@
-# 🤖 TX3 Pro Bot $50K - Guía de Uso Completa
+# 🤖 TX3 Bot - Guía de Uso Completa
 
-¡Bienvenido a tu bot profesional para el **TX3 Funding Challenge**! Sigue estos pasos exactos para ponerlo en marcha.
+¡Bienvenido a tu bot profesional de Trading Automático! Sigue estos pasos exactos para ponerlo en marcha.
 
 > ⚠️ **REQUISITO CRÍTICO**: Este bot utiliza la librería oficial `MetaTrader5` de Python, que **SOLO FUNCIONA EN WINDOWS**.
 > Si estás en **Mac** o **Linux**, necesitas ejecutar este bot en:
@@ -48,7 +48,7 @@ La forma más sencilla y automatizada de ejecutar el bot, instalar sus dependenc
 Este script Inteligente se encargará automáticamente de:
 - Verificar e instalar las librerías necesarias de Python.
 - Descargar el historial de MetaTrader y entrenar la memoria algorítmica (Machine Learning).
-- Iniciar el Bot en Fase 1 y levantar el servidor del Dashboard.
+- Iniciar el Bot y levantar el servidor web del Dashboard.
 
 > Si ves un error como `ModuleNotFoundError: No module named 'MetaTrader5'`, asegúrate de tener Python instalado correctamente en tu Windows y de haber marcado la casilla "Add to PATH" durante la instalación.
 
@@ -68,28 +68,24 @@ set HUGGINGFACE_TOKEN="tu_token_hf_aqui"
 
 > **Nota sobre la IA**: Si no configuras el `HUGGINGFACE_TOKEN`, el bot utilizará un filtro de "palabras clave" tradicional como respaldo para leer las noticias económicas.
 
-**Opcional:** Edita `config/settings.py` para ajustar parámetros como lotaje, riesgo, u horarios, aunque los valores por defecto están optimizados para el **Challenge de $50k**.
+**Opcional:** Edita `config/settings.py` para ajustar parámetros como lotaje, riesgo, drawdown máximo, u horarios. Los valores por defecto están optimizados para gestión de capital responsable.
 
 ---
 
 ## 4️⃣ Ejecución Manual del Bot
 
-Si prefieres la terminal en lugar del script `.bat`, el bot tiene 3 modos principales. Elige el que corresponda a tu fase actual:
+Si prefieres la terminal en lugar del script `.bat`, el bot tiene 2 modos principales. 
 
-### 🔵 FASE 1 (Objetivo 10% = $5,000)
+### 🟢 MODO REAL (LIVE)
+Ejecuta el bot para operar con tu dinero (o demo vinculada en MT5):
 ```bash
-python main.py --phase 1
-```
-
-### 🟣 FASE 2 (Objetivo 5% = $2,500)
-```bash
-python main.py --phase 2
+python main.py
 ```
 
 ### 🧪 MODO SIMULACIÓN (DRY RUN)
 Prueba que todo conecte sin abrir operaciones reales:
 ```bash
-python main.py --phase 1 --dry-run
+python main.py --dry-run
 ```
 
 Si todo está bien, verás un mensaje como:
@@ -153,7 +149,7 @@ Puedes enviar comandos desde Telegram directamente a tu bot para consultar su es
 
 | Acción | Comando |
 | :--- | :--- |
-| **Arranque Inteligente** | `.\START_BOT_AND_AI.bat` |
-| **Simular (Fase 1)** | `python main.py --phase 1 --dry-run` |
+| **Arranque Inteligente** | `.\START_BOT_AND_AI.bat` (Windows) o `./start_bot_mac.command` (Mac) |
+| **Simular (Dry-Run)** | `python main.py --dry-run` |
 | **Re-entrenar IA** | `python scripts/train_ml_model.py` |
 | **Telegram Ayuda** | Enviar `/help` al bot en Telegram |
